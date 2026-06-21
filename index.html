@@ -353,6 +353,26 @@ html, body {
 #ov-btn:hover { background: rgba(212,180,131,.14); border-color: var(--gold); }
 #ov-btn svg { width: 16px; height: 16px; fill: var(--gold-bright); }
 
+/* Bouton « enregistrer dans la galerie » (même style que la grille) */
+#dl-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: rgba(10,9,7,.6);
+  border: 1px solid rgba(212,180,131,.3);
+  border-radius: 9px; cursor: pointer; pointer-events: auto;
+  transition: background .3s var(--ease-soft), border-color .3s var(--ease-soft), transform .25s;
+}
+#dl-btn:hover { background: rgba(212,180,131,.14); border-color: var(--gold); }
+#dl-btn:active { transform: scale(.9); }
+#dl-btn svg { width: 18px; height: 18px; stroke: var(--gold-bright); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#dl-btn.busy { opacity: .55; pointer-events: none; }
+#dl-btn.busy svg { animation: dlPulse .8s ease infinite; }
+@keyframes dlPulse { 50% { opacity: .35; } }
+#dl-btn.ok  { border-color: #8fd19e; background: rgba(143,209,158,.16); }
+#dl-btn.ok  svg { stroke: #b9eec4; }
+#dl-btn.err { border-color: #e08a8a; }
+#dl-btn.err svg { stroke: #f2b8b8; }
+
 #overview {
   position: fixed; inset: 0; z-index: 80;
   background: rgba(6,6,6,.97);
@@ -451,11 +471,14 @@ html, body {
 /* Fond flouté peint uniquement pour la photo visible */
 .slide:not(.active):not(.leaving) .slide-bg-blur { display: none; }
 .slide-bg-blur {
-  position: absolute; inset: -50px;
-  width: calc(100% + 100px); height: calc(100% + 100px);
+  position: absolute; inset: -60px;
+  width: calc(100% + 120px); height: calc(100% + 120px);
   object-fit: cover;
-  filter: blur(22px) brightness(0.34) saturate(1.4);
-  transform: scale(1.12) translateZ(0);
+  /* Remplit le « letterbox » (barres noires autour d'une photo portrait sur
+     téléphone) avec une extension floue de la photo → rendu cinématographique
+     façon Apple/Instagram, au lieu d'un noir vide. */
+  filter: blur(34px) brightness(0.48) saturate(1.55);
+  transform: scale(1.18) translateZ(0);
   pointer-events: none;
 }
 /* fond sobre derrière les vidéos (pas de double décodage) */
@@ -658,11 +681,20 @@ html, body {
 @media (hover: none) { #album-view.on #swipe-hint { display: block; animation: fadeUp .8s ease 1s both, hintFade 1s ease 5s forwards; } }
 @keyframes hintFade { to { opacity: 0; } }
 
-/* Inactivité — masque l'UI album */
-.idle #top, .idle #bottom, .idle .nav-btn, .idle #media-tag { opacity: 0 !important; transition: opacity 1s var(--ease-soft); }
+/* Inactivité — masque l'UI immersive (musique, flèches, légende) … */
+.idle #top, .idle .nav-btn, .idle #media-tag, .idle #caption { opacity: 0 !important; transition: opacity 1s var(--ease-soft); }
+/* … mais garde les ACTIONS (grille + télécharger + compteur) accessibles, juste atténuées. */
+.idle #bottom .bottom-left { opacity: .4; transition: opacity 1s var(--ease-soft); }
 #top, #bottom { transition: opacity .8s var(--ease-soft); }
 /* le bouton retour et Clash restent visibles, mais s'estompent un peu en idle */
 .idle .back-btn { opacity: .25; }
+
+/* Dans l'album, le bouton Clash se fait discret (la photo prime) ; pleine
+   présence sur l'accueil. Il reprend sa taille au survol/toucher. */
+#album-view.on ~ #coc-btn { transform: translateX(-50%) scale(.85); opacity: .6; }
+#album-view.on ~ #coc-btn:hover,
+#album-view.on ~ #coc-btn:active { opacity: 1; transform: translateX(-50%) scale(.9); }
+.idle #coc-btn { opacity: .2; }
 
 /* ════════════════════════════════════════════════
    VERSION TÉLÉPHONE
@@ -756,6 +788,9 @@ html, body {
       <div class="bottom-left">
         <button id="ov-btn" aria-label="Vue d'ensemble" title="Vue d'ensemble">
           <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        </button>
+        <button id="dl-btn" aria-label="Enregistrer dans la galerie" title="Enregistrer dans ma galerie">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 4v10"/><path d="M8 10.5l4 4 4-4"/><path d="M5 19h14"/></svg>
         </button>
         <div id="counter"></div>
       </div>
@@ -1480,6 +1515,50 @@ function closeOverview(resume) {
   if (resume && albumRunning) activate(idx, false, 'next'); // reprend la slide courante
 }
 
+/* ─────────────────────── TÉLÉCHARGER LA PHOTO/VIDÉO COURANTE ───────────────────────
+   iPhone : navigator.share({files}) ouvre la feuille de partage → « Enregistrer
+   l'image / la vidéo » dans la galerie. PC & Android : repli <a download>. */
+async function downloadCurrent() {
+  const item = MEDIA[idx];
+  if (!item) return;
+  const btn = $('dl-btn');
+  const slide = $(`slide-${idx}`);
+  const el = slide && (slide.querySelector('img.slide-media[src]') || slide.querySelector('video.slide-media[src]'));
+  const url = (el && (el.currentSrc || el.getAttribute('src'))) || chooseSrc(item);
+  if (!url) return;
+
+  btn.classList.remove('ok', 'err');
+  btn.classList.add('busy');
+  resetIdle();
+  try {
+    const resp = await fetch(url, { mode: 'cors' });
+    if (!resp.ok) throw new Error('http ' + resp.status);
+    const blob = await resp.blob();
+    const ext = ((blob.type.split('/')[1] || '').split(';')[0]) || (item.type === 'video' ? 'mp4' : 'jpg');
+    const name = `mines-nancy-${String(idx + 1).padStart(2, '0')}.${ext}`;
+    const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Mines Nancy' });
+      } catch (e) {
+        if (e && e.name === 'AbortError') { btn.classList.remove('busy'); return; } // annulé : neutre
+        throw e;
+      }
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+    btn.classList.remove('busy'); btn.classList.add('ok');
+  } catch (e) {
+    btn.classList.remove('busy'); btn.classList.add('err');
+  }
+  setTimeout(() => btn.classList.remove('ok', 'err'), 2400);
+}
+
 /* ─────────────────────── ROUTAGE ─────────────────────── */
 function showScreen(name) {
   $('home').classList.toggle('on', name === 'home');
@@ -1506,6 +1585,8 @@ function goHome() {
 function pauseAlbum() {
   albumRunning = false;
   clearTimeout(autoTimer);
+  clearTimeout(idleTimer);
+  document.body.classList.remove('idle');   // évite que l'accueil hérite de l'état "idle" de l'album
   const av = document.querySelector('.slide.active video.slide-media');
   if (av) cleanupVideo(av);
 }
@@ -1546,6 +1627,7 @@ function bindEvents() {
 
   // Vue d'ensemble
   $('ov-btn').addEventListener('click', e => { e.stopPropagation(); openOverview(); });
+  $('dl-btn').addEventListener('click', e => { e.stopPropagation(); downloadCurrent(); });
   $('ov-close').addEventListener('click', () => closeOverview(true));
 
   document.addEventListener('keydown', e => {
