@@ -4,7 +4,7 @@
     {
       "name": "album",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "-p", "3000", "C:\\Users\\baptm\\OneDrive\\Desktop\\Album"],
+      "runtimeArgs": ["serve", "-p", "3000", "C:\\Users\\baptm\\OneDrive\\Documents\\GitHub\\camescopeviolent.github.io"],
       "port": 3000
     }
   ]

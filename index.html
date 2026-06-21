@@ -893,16 +893,17 @@ const IMAGES = [
 ];
 
 /* ── VIDÉOS (intercalées dans l'album, muettes) ──
-   .mov : lisible sur iPhone ; sur Android, sauté proprement.
-   Pour un fallback universel, fournis une version .mp4 et ajoute  srcFallback. */
+   Les .mp4 locaux sont lus partout. Les ex-.mov (illisibles sur Android) sont
+   passés par Cloudinary → livrés en .mp4 H.264 universel (iPhone + Android + PC).
+   chooseSrc() force déjà l'extension .mp4 sur toute URL Cloudinary. */
 const VIDEOS = [
   { src: "photos/6E11B7F5-31D7-4DAB-AA30-E45088F74E12.mp4" },
   { src: "photos/B034FEA8-3405-48C4-AF7C-8E757F1ABEE8.mp4" },
-  { src: "photos/E106AB83-78A5-452F-AE8F-06CF34FC208F.mov" },
+  { src: "https://res.cloudinary.com/dpc1iwlin/video/upload/v1782044185/n6vh5uzowozymyle2hte.mp4" },
   { src: "photos/F4405552-F553-4A24-AE71-941CF06FCC5F.mp4" },
-  { src: "photos/IMG_4641.MOV" },
-  { src: "photos/IMG_6398.MOV" },
-  { src: "photos/IMG_6721.MOV" },
+  { src: "https://res.cloudinary.com/dpc1iwlin/video/upload/v1782044195/ifo4fmnjblav4ds37c94.mp4" },
+  { src: "https://res.cloudinary.com/dpc1iwlin/video/upload/v1782044203/jgm5icfyixs9bk7a1rtu.mp4" },
+  { src: "https://res.cloudinary.com/dpc1iwlin/video/upload/v1782044211/lfilmgb7hxoz8m5dnias.mp4" },
 ];
 
 /* ── Photos qui flottent en arrière-plan du menu (petites, légères) ── */
@@ -1225,7 +1226,8 @@ function startProgress(durationSec) {
 
 /* ─────────────────────── MUSIQUE ─────────────────────── */
 const PLAYLIST = [
-  { src: 'audio/Samsung SMX C200 Memory Cam teste.mp3',                   label: 'Forever Young'    },
+  { src: 'audio/Forever Young.mp3',                                      label: 'Forever Young'    },
+  { src: 'audio/Let Down.mp3',                                            label: 'Let Down'        },
   { src: 'audio/Philibert.mp3',                                           label: 'Philibert'        },
   { src: 'audio/Low Roar - Give Up.mp3',                                  label: 'Give Up'          },
   { src: 'audio/Red_Hot_Chilli_Peppers_-_Under_the_bridge_(mp3.pm).mp3', label: 'Under the Bridge' },
