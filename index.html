@@ -902,6 +902,16 @@ html, body {
 }
 #skip-btn:hover { color: var(--gold-bright); transform: scale(1.18); }
 #skip-btn:active { transform: scale(.92); }
+#music-add-btn {
+  background: none; border: none; cursor: pointer; padding: 0;
+  color: rgba(212,180,131,.6); font-size: 1.1rem; line-height: 1;
+  display: flex; align-items: center; transition: color .25s, transform .25s;
+}
+#music-add-btn:hover { color: var(--gold-bright); transform: scale(1.18); }
+#music-add-btn:active { transform: scale(.92); }
+#music-add-btn.busy { color: var(--gold-bright); }
+#music-add-btn.ok { color: #b9eec4; }
+#music-add-btn.err { color: #f2b8b8; }
 
 .bars { display: flex; align-items: flex-end; gap: 1.8px; height: 13px; }
 .bar {
@@ -1124,7 +1134,9 @@ html, body {
         </button>
         <span id="track-name">Forever Young</span>
         <button id="skip-btn" aria-label="Chanson suivante" title="Chanson suivante">⏭</button>
+        <button id="music-add-btn" aria-label="Ajoute ta musique" title="Ajoute une musique (ou l'audio d'une vidéo)">+</button>
       </div>
+      <input type="file" id="music-input" accept="audio/*,video/*" hidden>
     </div>
     <div id="bottom">
       <div class="bottom-left">
@@ -1828,6 +1840,65 @@ function toggleMusic() {
 }
 /* Relance la musique si elle était active (utile en sortant de la Clip Farm où elle est coupée) */
 function resumeMusicIfOn() { if (musicOn && audio.paused && !document.hidden) audio.play().catch(() => {}); }
+
+/* ── Musique collaborative : chacun ajoute sa chanson au fond sonore (comme une photo) ── */
+const TRACKS_TABLE = 'tracks';
+
+async function fetchTracks() {
+  try {
+    const res = await fetch(`${SUPABASE.url}/rest/v1/${TRACKS_TABLE}?select=title,url&order=id.asc`,
+      { headers: { apikey: SUPABASE.anonKey, Authorization: `Bearer ${SUPABASE.anonKey}` } });
+    if (!res.ok) return [];
+    const rows = await res.json();
+    return rows.map(r => ({ src: r.url, label: r.title || 'Musique' }));
+  } catch (e) { return []; }
+}
+async function saveTrack(title, url) {
+  const res = await fetch(`${SUPABASE.url}/rest/v1/${TRACKS_TABLE}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE.anonKey, Authorization: `Bearer ${SUPABASE.anonKey}`,
+               'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify({ title, url }),
+  });
+  if (!res.ok) throw new Error('track insert failed');
+}
+function musicMsg(text) { $('track-name').textContent = text; }
+function musicMsgRestore(delay) {
+  setTimeout(() => { const t = PLAYLIST[trackIdx]; $('track-name').textContent = t ? t.label : ''; }, delay);
+}
+function handleMusicFile(file) {
+  if (!file) return;
+  const btn = $('music-add-btn');
+  if (file.size > 60 * 1024 * 1024) { musicMsg('fichier trop lourd (>60 Mo)'); musicMsgRestore(2600); return; }
+  btn.classList.remove('ok', 'err'); btn.classList.add('busy');
+  const form = new FormData();
+  form.append('file', file);
+  form.append('upload_preset', CLOUDINARY.uploadPreset);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY.cloudName}/auto/upload`);
+  xhr.upload.addEventListener('progress', e => {
+    if (e.lengthComputable) musicMsg(`Envoi musique… ${Math.round(e.loaded / e.total * 100)}%`);
+  });
+  xhr.onload = async () => {
+    let data = null; try { data = JSON.parse(xhr.responseText); } catch (e) {}
+    btn.classList.remove('busy');
+    if (xhr.status < 200 || xhr.status >= 300 || !data || !data.secure_url) {
+      btn.classList.add('err'); musicMsg('échec ✗'); musicMsgRestore(2600); setTimeout(() => btn.classList.remove('err'), 2600); return;
+    }
+    // Livraison forcée en .mp3 → ne garde QUE l'audio (si c'était une vidéo, l'image est retirée)
+    const url = data.secure_url.replace(/\.\w+($|\?)/i, '.mp3');
+    const title = (file.name.replace(/\.[^.]+$/, '') || 'Musique').slice(0, 40);
+    try {
+      await saveTrack(title, url);
+      PLAYLIST.push({ src: url, label: title });          // dispo dans le ⏭ et l'enchaînement auto
+      btn.classList.add('ok'); musicMsg(`♪ ${title} ✓`); musicMsgRestore(3200); setTimeout(() => btn.classList.remove('ok'), 3200);
+    } catch (e) {
+      btn.classList.add('err'); musicMsg('table « tracks » manquante ?'); musicMsgRestore(3200); setTimeout(() => btn.classList.remove('err'), 3200);
+    }
+  };
+  xhr.onerror = () => { btn.classList.remove('busy'); btn.classList.add('err'); musicMsg('échec réseau ✗'); musicMsgRestore(2600); setTimeout(() => btn.classList.remove('err'), 2600); };
+  xhr.send(form);
+}
 
 /* ─────────────────────── UPLOAD VISITEURS ─────────────────────── */
 
@@ -2711,6 +2782,8 @@ function bindEvents() {
   $('next-btn').addEventListener('click', () => { goTo(idx + 1, 'next'); resetIdle(); });
   $('music-btn').addEventListener('click', e => { e.stopPropagation(); startMusicOnce(); toggleMusic(); });
   $('skip-btn').addEventListener('click', e => { e.stopPropagation(); startMusicOnce(); skipTrack(); });
+  $('music-add-btn').addEventListener('click', e => { e.stopPropagation(); $('music-input').click(); });
+  $('music-input').addEventListener('change', e => { handleMusicFile(e.target.files[0]); e.target.value = ''; });
 
   // Coupe la musique quand on quitte l'onglet ou qu'on bascule d'appli (iOS la
   // laissait tourner en fond comme Spotify). Reprend au retour si elle était active.
@@ -2845,6 +2918,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
   loadCommentCounts();                            // pastilles de commentaires (1 requête, non bloquant)
   loadAlbums();                                   // cartes des albums créés par les visiteurs
+  fetchTracks().then(t => { if (t.length) PLAYLIST.push(...t); });   // musiques ajoutées par les visiteurs
 });
 </script>
 </body>
