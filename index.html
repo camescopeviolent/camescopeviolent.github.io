@@ -544,6 +544,22 @@ html, body {
 #ov-btn:hover { background: rgba(212,180,131,.14); border-color: var(--gold); }
 #ov-btn svg { width: 16px; height: 16px; fill: var(--gold-bright); }
 
+/* Bouton pause / lecture du défilement */
+#pause-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: rgba(10,9,7,.6); border: 1px solid rgba(212,180,131,.3);
+  border-radius: 9px; cursor: pointer; pointer-events: auto;
+  transition: background .3s var(--ease-soft), border-color .3s var(--ease-soft), transform .25s;
+}
+#pause-btn:hover { background: rgba(212,180,131,.14); border-color: var(--gold); }
+#pause-btn:active { transform: scale(.9); }
+#pause-btn svg { width: 17px; height: 17px; fill: var(--gold-bright); }
+#pause-btn .ic-play { display: none; }
+#pause-btn.paused .ic-pause { display: none; }
+#pause-btn.paused .ic-play { display: block; }
+#pause-btn.paused { border-color: rgba(232,207,160,.65); background: rgba(212,180,131,.18); }
+
 /* Bouton « enregistrer dans la galerie » (même style que la grille) */
 #dl-btn {
   display: flex; align-items: center; justify-content: center;
@@ -1054,6 +1070,10 @@ html, body {
     </div>
     <div id="bottom">
       <div class="bottom-left">
+        <button id="pause-btn" aria-label="Pause" title="Pause / Lecture">
+          <svg class="ic-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="3.6" height="14" rx="1.2"/><rect x="14.4" y="5" width="3.6" height="14" rx="1.2"/></svg>
+          <svg class="ic-play" viewBox="0 0 24 24"><path d="M8 5.2l11 6.8-11 6.8z"/></svg>
+        </button>
         <button id="ov-btn" aria-label="Vue d'ensemble" title="Vue d'ensemble">
           <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
         </button>
@@ -1350,6 +1370,7 @@ const DEMO_GRADIENTS = [
 
 let idx = 0;
 let autoTimer = null;
+let paused = false;   // pause manuelle du défilement automatique
 let idleTimer = null;
 let touchX = 0, touchY = 0;
 let musicOn = false, musicStarted = false;
@@ -1517,6 +1538,7 @@ function playActiveVideo(v, item, i) {
   let advanced = false;
   const advance = () => {
     if (advanced || v._dead) return;
+    if (paused || commentsOpen) return;   // pause manuelle ou panneau commentaires ouvert
     advanced = true;
     cleanupVideo(v);
     if (albumRunning) goTo(i + 1, 'next');
@@ -1626,13 +1648,12 @@ function activate(i, silent, dir = 'next') {
     playActiveVideo(v, item, i);
   } else {
     loadAround(i);
-    startProgress(CONFIG.slideDuration);
-    scheduleNext();
+    if (!paused) { startProgress(CONFIG.slideDuration); scheduleNext(); }
   }
 }
 
 function goTo(i, dir) {
-  if (!albumRunning) return;
+  if (!albumRunning || commentsOpen) return;   // pas de changement de photo pendant qu'on commente
   const n = MEDIA.length;
   const newIdx = ((i % n) + n) % n;
   if (!dir) {
@@ -1646,7 +1667,7 @@ function goTo(i, dir) {
 
 function scheduleNext() {
   clearTimeout(autoTimer);
-  if (!albumRunning || !CONFIG.autoPlay) return;
+  if (!albumRunning || !CONFIG.autoPlay || paused || commentsOpen) return;
   if (MEDIA[idx].type === 'video') return;   // la vidéo gère sa propre avance
   autoTimer = setTimeout(() => goTo(idx + 1, 'next'), CONFIG.slideDuration * 1000);
 }
@@ -1660,6 +1681,32 @@ function startProgress(durationSec) {
     bar.style.transition = `transform ${durationSec}s linear`;
     bar.style.transform = 'scaleX(1)';
   }));
+}
+/* Fige la barre de progression à son état courant (utilisé à la mise en pause) */
+function freezeProgress() {
+  const bar = $('progress');
+  const t = getComputedStyle(bar).transform;
+  bar.style.transition = 'none';
+  bar.style.transform = (t && t !== 'none') ? t : 'scaleX(0)';
+}
+function updatePauseBtn() {
+  const b = $('pause-btn');
+  if (b) { b.classList.toggle('paused', paused); b.setAttribute('aria-label', paused ? 'Reprendre' : 'Pause'); }
+  document.body.classList.toggle('is-paused', paused);
+}
+/* Pause / reprise du défilement automatique (le visiteur peut figer quand il veut) */
+function togglePause() {
+  paused = !paused;
+  updatePauseBtn();
+  const v = document.querySelector('.slide.active video.slide-media');
+  if (paused) {
+    clearTimeout(autoTimer);
+    freezeProgress();
+    if (v) { clearTimeout(v._capT); v.pause(); }
+  } else if (albumRunning) {
+    if (MEDIA[idx].type === 'video') { if (v) v.play().catch(() => {}); }
+    else { startProgress(CONFIG.slideDuration); scheduleNext(); }
+  }
 }
 
 /* ─────────────────────── MUSIQUE ─────────────────────── */
@@ -1924,7 +1971,7 @@ function openComments() {
   commentsOpen = true;
   clearTimeout(autoTimer);
   const v = document.querySelector('.slide.active video.slide-media');
-  if (v) { clearTimeout(v._capT); v.pause(); }
+  if (v) { clearTimeout(v._capT); clearTimeout(v._loadGuard); v.pause(); }
   commentKey = mediaKey(MEDIA[idx]);
   try { $('cm-name').value = localStorage.getItem('cm_name') || ''; } catch (e) {}
   $('cm-text').value = ''; $('cm-text').placeholder = 'écris un commentaire…';
@@ -1935,7 +1982,7 @@ function openComments() {
 function closeComments() {
   commentsOpen = false;
   $('comments').classList.remove('on');
-  if (!albumRunning) return;
+  if (!albumRunning || paused) return;   // si on a mis en pause manuelle, on reste en pause
   const item = MEDIA[idx];
   if (item && item.type === 'video') {
     const v = document.querySelector('.slide.active video.slide-media');
@@ -2055,6 +2102,7 @@ function enterAlbum() {
   resumeMusicIfOn();   // si on arrive depuis la Clip Farm (musique coupée), elle reprend
   showScreen('album');
   albumRunning = true;
+  paused = false; updatePauseBtn();
   resetIdle(); showNav();
   activate(idx, false, 'next');
 }
@@ -2552,6 +2600,7 @@ function bindEvents() {
   window.addEventListener('resize', () => { if ($('game').classList.contains('on')) sizeGameCanvas(); });
 
   // Vue d'ensemble
+  $('pause-btn').addEventListener('click', e => { e.stopPropagation(); togglePause(); resetIdle(); });
   $('ov-btn').addEventListener('click', e => { e.stopPropagation(); openOverview(); });
   $('dl-btn').addEventListener('click', e => { e.stopPropagation(); downloadCurrent(); });
   $('cm-btn').addEventListener('click', e => { e.stopPropagation(); openComments(); });
